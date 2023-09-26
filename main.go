@@ -9,50 +9,46 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecr/types"
+	"github.com/caarlos0/env"
 	"github.com/tidwall/sjson"
 	"io/ioutil"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
 
-const (
-	AccessKey       = "ACCESS_KEY"
-	SecretKey       = "SECRET_KEY"
-	EndpointUrl     = "ENDPOINT_URL"
-	AwsRegion       = "AWS_REGION"
-	LastFetchedTime = "LAST_FETCHED_TIME"
-	REPOSITORY      = "REPOSITORY"
-	CiPipelineId    = "CI_PIPELINE_ID"
-)
+type DockerConfiguration struct {
+	AccessKey       string `env:"ACCESS_KEY"`
+	SecretKey       string `env:"SECRET_KEY"`
+	EndPointUrl     string `env:"DOCKER_REGISTRY_URL"`
+	AwsRegion       string `env:"AWS_REGION"`
+	LastFetchedTime string `env:"LAST_FETCHED_TIME"`
+	Repositories    string `env:"REPOSITORY"`
+}
 
-func setEnvForTesting() {
-
+func GetDockerConfiguration() (*DockerConfiguration, error) {
+	cfg := &DockerConfiguration{}
+	err := env.Parse(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, err
 }
 
 func main() {
 	fmt.Println("hello")
-	//allRepos := strings.Split(REPOS, ",")
-	setEnvForTesting()
-	accessKey := os.Getenv(AccessKey)
-	secretKey := os.Getenv(SecretKey)
-	endpointUrl := os.Getenv(EndpointUrl)
-	region := os.Getenv(AwsRegion)
-	lastFetchedTime, err := parseTime(os.Getenv(LastFetchedTime))
+	dockerConfiguration, err := GetDockerConfiguration()
+	if err != nil {
+		fmt.Println("error in getting docker configuration", "err", err.Error())
+		return
+	}
+	lastFetchedTime, err := parseTime(dockerConfiguration.LastFetchedTime)
 	if err != nil {
 		fmt.Println("error in parsing last fetched time, using time zero golang", err)
 	}
-	repoName := os.Getenv(REPOSITORY)
-	ciPipelineId, err := strconv.Atoi(os.Getenv(CiPipelineId))
-	if err != nil {
-		fmt.Println("error in getting ciPipeline", err.Error())
-		return
-	}
-	repo := strings.Split(repoName, ",")
+	repo := strings.Split(dockerConfiguration.Repositories, ",")
 	for _, value := range repo {
-		err = GetResultsAndSaveInFile(accessKey, secretKey, endpointUrl, region, value, lastFetchedTime, ciPipelineId)
+		err = GetResultsAndSaveInFile(dockerConfiguration.AccessKey, dockerConfiguration.SecretKey, dockerConfiguration.EndPointUrl, dockerConfiguration.AwsRegion, value, lastFetchedTime)
 		if err != nil {
 			fmt.Println("error i  getting results and saving", "err", err.Error())
 			continue
@@ -62,8 +58,7 @@ func main() {
 }
 
 func parseTime(timeString string) (time.Time, error) {
-	layout := "2006-01-02T15:04:05.000Z"
-	t, err := time.Parse(layout, timeString)
+	t, err := time.Parse(time.RFC3339, timeString)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -78,12 +73,13 @@ type AwsBaseConfig struct {
 	Region      string `json:"region"`
 }
 
-type ImageDetailsCi struct {
+type ImageDetailsFromCR struct {
 	ImageDetails []types.ImageDetail `json:"imageDetails"`
-	CiPipelineId int                 `json:"ciPipelineId"`
+	Region       string              `json:"region"`
 }
 
-func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion, repositoryName string, lastFetchedTime time.Time, ciPipelineId int) error {
+// GetResultsAndSaveInFile Polls the Cr and get updated metadata and images from CR and save it to specified file.
+func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion, repositoryName string, lastFetchedTime time.Time) error {
 	awsConfig := &AwsBaseConfig{
 		AccessKey: accessKey,
 		Passkey:   secretKey,
@@ -135,9 +131,9 @@ func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion,
 		}
 
 	} else {
-		imageDetailsAgainstCi := &ImageDetailsCi{
+		imageDetailsAgainstCi := &ImageDetailsFromCR{
 			ImageDetails: filteredImages,
-			CiPipelineId: ciPipelineId,
+			Region:       awsRegion,
 		}
 
 		file, err := json.MarshalIndent(imageDetailsAgainstCi, "", " ")
@@ -155,6 +151,7 @@ func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion,
 
 }
 
+// GetAwsClientFromCred creates service client for ecr operations
 func GetAwsClientFromCred(ecrBaseConfig *AwsBaseConfig) (*ecr.Client, error) {
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ecrBaseConfig.AccessKey, ecrBaseConfig.Passkey, "")))
 	if err != nil {
@@ -207,6 +204,7 @@ func getLastPushedImages(filterImages []types.ImageDetail) []types.ImageDetail {
 	return filterImages
 }
 
+// filterAlreadyPresentArtifacts filter out the images which are before the last fetched time to avoid same images.
 func filterAlreadyPresentArtifacts(describeImagesResults []types.ImageDetail, lastFetchedTime time.Time) []types.ImageDetail {
 	filteredImages := make([]types.ImageDetail, 0)
 	for _, image := range describeImagesResults {
