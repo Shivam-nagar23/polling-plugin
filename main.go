@@ -9,10 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecr/types"
+	"github.com/tidwall/sjson"
 	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,13 +29,7 @@ const (
 )
 
 func setEnvForTesting() {
-	os.Setenv(AccessKey, "AKIAWPTCEWL5XI5G3Q4Q")
-	os.Setenv(SecretKey, "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")
-	os.Setenv(EndpointUrl, "445808685819.dkr.ecr.us-east-2.amazonaws.com")
-	os.Setenv(AwsRegion, "us-east-2")
-	os.Setenv(LastFetchedTime, "")
-	os.Setenv(REPOSITORY, "kushagratest")
-	os.Setenv(CiPipelineId, "1")
+
 }
 
 func main() {
@@ -54,8 +50,15 @@ func main() {
 		fmt.Println("error in getting ciPipeline", err.Error())
 		return
 	}
+	repo := strings.Split(repoName, ",")
+	for _, value := range repo {
+		err = GetResultsAndSaveInFile(accessKey, secretKey, endpointUrl, region, value, lastFetchedTime, ciPipelineId)
+		if err != nil {
+			fmt.Println("error i  getting results and saving", "err", err.Error())
+			continue
+		}
+	}
 
-	GetResultsAndSaveInFile(accessKey, secretKey, endpointUrl, region, repoName, lastFetchedTime, ciPipelineId)
 }
 
 func parseTime(timeString string) (time.Time, error) {
@@ -105,19 +108,48 @@ func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion,
 		filteredImages = filterAlreadyPresentArtifacts(allImages, lastFetchedTime)
 	}
 
-	imageDetailsAgainstCi := &ImageDetailsCi{
-		ImageDetails: filteredImages,
-		CiPipelineId: ciPipelineId,
-	}
-	file, err := json.MarshalIndent(imageDetailsAgainstCi, "", " ")
+	fileExist, err := bean.CheckFileExists(bean.FileName)
 	if err != nil {
-		fmt.Println("error in marshalling intend results", "err", err)
+		fmt.Println("error in checking file exist or not", "err", err.Error())
 		return err
 	}
-	err = ioutil.WriteFile(bean.FileName, file, bean.PermissionMode)
-	if err != nil {
-		fmt.Println("error in writing results to json file", "err", err)
-		return err
+	if fileExist {
+		file, err := ioutil.ReadFile(bean.FileName)
+		if err != nil {
+			fmt.Println("error in reading file", "err", err.Error())
+			return err
+		}
+		updatedFile := string(file)
+		for _, val := range filteredImages {
+			updatedFile, err = sjson.Set(updatedFile, "imageDetails.-1", val)
+			if err != nil {
+				fmt.Println("error in appending in updated file", "err", err.Error())
+				return err
+
+			}
+		}
+		err = bean.WriteToFile(updatedFile, bean.FileName)
+		if err != nil {
+			fmt.Println("error in writing file", "err", err.Error())
+			return err
+		}
+
+	} else {
+		imageDetailsAgainstCi := &ImageDetailsCi{
+			ImageDetails: filteredImages,
+			CiPipelineId: ciPipelineId,
+		}
+
+		file, err := json.MarshalIndent(imageDetailsAgainstCi, "", " ")
+		if err != nil {
+			fmt.Println("error in marshalling intend results", "err", err)
+			return err
+		}
+		err = bean.WriteToFile(string(file), bean.FileName)
+		if err != nil {
+			fmt.Println("error in writing file", "err", err.Error())
+			return err
+		}
 	}
 	return nil
 

@@ -1,7 +1,9 @@
 package bean
 
 import (
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -16,13 +18,24 @@ func ExtractOutRegistryId(hostUrl string) string {
 	return res[0]
 
 }
-func CheckFileExistsOrCreate(filename string) error {
-	_, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		_, err := os.Create(filename)
-		if err != nil {
-			return err
-		}
+func CheckFileExists(filename string) (bool, error) {
+	if _, err := os.Stat(filename); err == nil {
+		// exists
+		return true, nil
+
+	} else if errors.Is(err, os.ErrNotExist) {
+		// not exists
+		return false, nil
+	} else {
+		// Some other error
+		return false, err
+	}
+}
+func WriteToFile(file string, fileName string) error {
+	err := ioutil.WriteFile(fileName, []byte(file), PermissionMode)
+	if err != nil {
+		fmt.Println("error in writing results to json file", "err", err)
+		return err
 	}
 	return nil
 }
