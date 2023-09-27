@@ -36,7 +36,7 @@ func GetDockerConfiguration() (*DockerConfiguration, error) {
 }
 
 func main() {
-	fmt.Println("hello")
+
 	dockerConfiguration, err := GetDockerConfiguration()
 	if err != nil {
 		fmt.Println("error in getting docker configuration", "err", err.Error())
