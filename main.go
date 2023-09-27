@@ -40,18 +40,18 @@ func main() {
 	dockerConfiguration, err := GetDockerConfiguration()
 	if err != nil {
 		fmt.Println("error in getting docker configuration", "err", err.Error())
-		return
+		panic("error in getting docker configuration")
 	}
 	lastFetchedTime, err := parseTime(dockerConfiguration.LastFetchedTime)
 	if err != nil {
-		fmt.Println("error in parsing last fetched time, using time zero golang", err)
+		fmt.Println("error in parsing last fetched time, using time zero in golang", err)
 	}
 	repo := strings.Split(dockerConfiguration.Repositories, ",")
 	for _, value := range repo {
 		err = GetResultsAndSaveInFile(dockerConfiguration.AccessKey, dockerConfiguration.SecretKey, dockerConfiguration.EndPointUrl, dockerConfiguration.AwsRegion, value, lastFetchedTime)
 		if err != nil {
-			fmt.Println("error i  getting results and saving", "err", err.Error())
-			continue
+			fmt.Println("error in  getting results and saving", "err", err.Error())
+			panic("error in  getting results and saving")
 		}
 	}
 
@@ -147,6 +147,7 @@ func GetResultsAndSaveInFile(accessKey, secretKey, dockerRegistryURL, awsRegion,
 			return err
 		}
 	}
+	fmt.Println("Polling from container registry succeeded")
 	return nil
 
 }
@@ -185,7 +186,7 @@ func GetAllImagesWithMetadata(client *ecr.Client, registryId, repositoryName str
 		describeImagesResults = append(describeImagesResults, describeImagesOutput.ImageDetails...)
 		nextToken = describeImagesOutput.NextToken
 		if nextToken == nil {
-			fmt.Println("no more images are present in the repository")
+			fmt.Println("no more images are present in the repository to process")
 			break
 		}
 	}
